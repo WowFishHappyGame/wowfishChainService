@@ -1,0 +1,16 @@
+Name: chain
+Host: 0.0.0.0
+Port: 8888
+
+Chain: 
+  # Rpc: "wss://arb-sepolia.g.alchemy.com/v2/hLhkQSicZ9EKv9qzcMf87knjoAQArLVh"
+  # WowToken: 0x3feB9a9B764A54B46dB90c74001694329A90F2D5
+  Rpc: "ws://192.168.1.124:8545"
+  WowToken: 0x8e86cDD6b5252b45305106071db047563F00e0a8
+  WoWNFT: 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+  Callback: 
+
+Kms:
+  Key: 
+  Secret: 
+  Alias: 

@@ -1,0 +1,9 @@
+services:
+  wowfish:
+    image: wowfish/compose:v1.0.0
+    container_name: dauthsecret
+    ports:
+      - 8017:8888
+    volumes:
+      - ./wowfishconfigTemp.yaml:/app/bin/etc/wowfishconfig.yaml
+      - ./logs:/app/bin/logs
