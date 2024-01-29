@@ -11,6 +11,8 @@ Chain:
 Kms:
   Key: 
   Secret: 
-  Alias: 
+  GameWallet: "alias/wowfishBack"
+  DisposeWallet: "alias/wofishDespose"
+  GantWallet: "alias/wowfishGain" 
 
 SecretKey:

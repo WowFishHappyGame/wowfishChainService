@@ -3,6 +3,7 @@ package callback
 import (
 	"errors"
 	"strconv"
+	"wowfish/api/internal/util"
 	"wowfish/api/pkg/dohttp"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -33,13 +34,17 @@ func Instance() *CallBackToWowfish {
 
 func (this *CallBackToWowfish) Callback(data *CallBackToWowfishData) error {
 	if this.callbackServer != "" {
-		rsp, err := dohttp.DoMultiFormHttp(map[string]string{}, "POST", this.callbackServer,
-			map[string]string{
-				"ret":     strconv.FormatInt(data.Ret, 10),
-				"address": data.From,
-				"to":      data.To,
-				"amount":  data.Amount,
-			})
+
+		originData := map[string]string{
+			"ret":     strconv.FormatInt(data.Ret, 10),
+			"address": data.From,
+			"to":      data.To,
+			"amount":  data.Amount,
+		}
+
+		sign := util.Instance().GetSign(originData)
+		originData["sign"] = sign
+		rsp, err := dohttp.DoMultiFormHttp(map[string]string{}, "POST", this.callbackServer, originData)
 		defer rsp.Body.Close()
 		if nil != err {
 			logx.Errorf("post to callback error %s", err.Error())

@@ -10,6 +10,7 @@ import (
 	"wowfish/api/internal/config"
 	"wowfish/api/internal/handler"
 	"wowfish/api/internal/svc"
+	"wowfish/api/internal/util"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -45,6 +46,7 @@ func main() {
 	defer chainClient.Exit()
 
 	callback.Instance().Init(c.Chain.Callback)
+	util.Instance().Init(c.SecretKey)
 
 	server := rest.MustNewServer(c.RestConf)
 	defer server.Stop()
