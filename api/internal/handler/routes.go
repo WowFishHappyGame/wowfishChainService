@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	chain "wowfish/api/internal/handler/chain"
+	chainQuery "wowfish/api/internal/handler/chainQuery"
 	"wowfish/api/internal/svc"
 
 	"github.com/zeromicro/go-zero/rest"
@@ -12,16 +13,30 @@ import (
 
 func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 	server.AddRoutes(
+		rest.WithMiddlewares(
+			[]rest.Middleware{serverCtx.AuthMiddleware},
+			[]rest.Route{
+				{
+					Method:  http.MethodPost,
+					Path:    "/wowTransfer",
+					Handler: chain.WowTransferHandler(serverCtx),
+				},
+			}...,
+		),
+		rest.WithPrefix("/chain"),
+	)
+
+	server.AddRoutes(
 		[]rest.Route{
 			{
 				Method:  http.MethodPost,
-				Path:    "/withdraw",
-				Handler: chain.WithdrawHandler(serverCtx),
+				Path:    "/queryNft",
+				Handler: chainQuery.QueryNftHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
-				Path:    "/queryNft",
-				Handler: chain.QueryNftHandler(serverCtx),
+				Path:    "/queryAmount",
+				Handler: chainQuery.QueryAmountHandler(serverCtx),
 			},
 		},
 		rest.WithPrefix("/chain"),

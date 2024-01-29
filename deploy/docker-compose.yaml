@@ -1,7 +1,8 @@
+version: '3'
 services:
   wowfish:
     image: wowfish/compose:v1.0.0
-    container_name: dauthsecret
+    container_name: wowfishService
     ports:
       - 8017:8888
     volumes:

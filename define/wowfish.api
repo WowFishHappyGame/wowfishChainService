@@ -1,10 +1,13 @@
 syntax = "v1"
 
-type WithdrawReqs {
-	Reqs string `form:"accounts"`
+type TransferReqs {
+	From   string `form:"from"`
+	To     string `form:"to"`
+	Amount string `form:"amount"`
+	Sign   string `form:"sign"`
 }
 
-type WithdrawResp {
+type TransferResp {
 	Result bool `json:"result"`
 }
 
@@ -16,16 +19,33 @@ type NftQueryIdsResp {
 	Ids []int64 `form:"ids"`
 }
 
+type WoWQueryAmountReq {
+	Address string `form:"address"`
+}
+
+type WoWQueryAmountResp {
+	Amount string `form:"amount"`
+}
+
 @server(
 	group: chain
 	prefix: /chain
+	middleware: AuthMiddleware
 )
 
 service chain {
-	@handler withdraw
-	post /withdraw(WithdrawReqs) returns(WithdrawResp)
+	@handler wowTransfer
+	post /wowTransfer(TransferReqs) returns(TransferResp)
+}
 
+@server(
+	group: chainQuery
+	prefix: /chain
+)
+service chain {
 	@handler queryNft
 	post /queryNft(NftQueryIdsReq) returns(NftQueryIdsResp)
 
+	@handler queryAmount
+	post /queryAmount(WoWQueryAmountReq) returns(WoWQueryAmountResp)
 }

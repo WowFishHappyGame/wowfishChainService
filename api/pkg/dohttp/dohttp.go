@@ -11,11 +11,11 @@ import (
 )
 
 // DoMultiFormHttp support multi-form body
-func DoMultiFormHttp(headers map[string]string, Method, Url string, mf map[string]string) (*http.Response, error) {
+func DoMultiFormHttp(headers map[string]string, Method, Url string, data map[string]string) (*http.Response, error) {
 	var bufReader bytes.Buffer
 	writer := multipart.NewWriter(&bufReader)
 
-	for k, v := range mf {
+	for k, v := range data {
 		_ = writer.WriteField(k, v)
 	}
 

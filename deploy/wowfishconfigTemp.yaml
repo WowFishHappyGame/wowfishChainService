@@ -3,12 +3,14 @@ Host: 0.0.0.0
 Port: 8888
 
 Chain: 
-  Rpc: 
-  WowToken:
-  WoWNFT:
-  Callback:
+  Rpc: "https://arbitrum-goerli.blockpi.network/v1/rpc/a6452d54066e293d1e0a72b414a17a2b291717b8"
+  WowToken: 0x6788a0567B90Ec2ef9FD71f40Ddf03F1645EfF0A
+  WoWNFT: 0xC947d8ffC4060B8698EA37638EC47288Fc3BcCF8
+  Callback: "https://testchainfsih.gz-cube.com:8821/chain/consume"
 
 Kms:
   Key: 
   Secret: 
   Alias: 
+
+SecretKey:

@@ -3,9 +3,11 @@ package config
 import "github.com/zeromicro/go-zero/rest"
 
 type KmsConfig struct {
-	Key    string
-	Secret string
-	Alias  string
+	Key           string
+	Secret        string
+	GameWallet    string
+	DisposeWallet string
+	GantWallet    string
 }
 
 type ChainConfig struct {
@@ -17,6 +19,7 @@ type ChainConfig struct {
 
 type Config struct {
 	rest.RestConf
-	Chain ChainConfig
-	Kms   KmsConfig
+	Chain     ChainConfig
+	Kms       KmsConfig
+	SecretKey string
 }

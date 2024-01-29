@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
+	"os"
 
+	"wowfish/api/internal/callback"
+	"wowfish/api/internal/chain"
 	"wowfish/api/internal/config"
 	"wowfish/api/internal/handler"
 	"wowfish/api/internal/svc"
-	"wowfish/api/pkg/chain"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -19,13 +20,15 @@ var configFile = flag.String("f", "etc/wowfishconfig.yaml", "the config file")
 
 func main() {
 	flag.Parse()
-
+	logModule := "file"
+	if os.Getenv("DEBUG") == "true" {
+		logModule = "console"
+	}
 	logConfig := logx.LogConf{
-		ServiceName: "wowfish",
-		Mode:        "file",
-		Rotation:    "daily",
-		KeepDays:    10,
-		Path:        "./logs",
+		Mode:     logModule,
+		Rotation: "daily",
+		KeepDays: 10,
+		Path:     "./logs",
 	}
 
 	logx.MustSetup(logConfig)
@@ -41,12 +44,14 @@ func main() {
 	}
 	defer chainClient.Exit()
 
+	callback.Instance().Init(c.Chain.Callback)
+
 	server := rest.MustNewServer(c.RestConf)
 	defer server.Stop()
 
 	ctx := svc.NewServiceContext(c)
 	handler.RegisterHandlers(server, ctx)
 
-	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
+	logx.Infof("Starting server at %s:%d...\n", c.Host, c.Port)
 	server.Start()
 }

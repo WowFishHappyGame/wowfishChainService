@@ -6,9 +6,11 @@ import (
 	"crypto/ecdsa"
 	"encoding/asn1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -29,14 +31,18 @@ type asn1EcSig struct {
 	S asn1.RawValue
 }
 
+type KMSWallet struct {
+	id      string
+	pubKey  *ecdsa.PublicKey //key public key
+	Address common.Address
+}
+
 type KmsEthMgr struct {
 	awsCfg           aws.Config
 	kmsSvc           *kms.Client
 	ctx              context.Context
-	keyID            string           //key id
-	Address          common.Address   //key wallet
-	SigningAlgorithm string           // aws.String("ECDSA_SHA_256"),
-	pubKey           *ecdsa.PublicKey //key public key
+	Wallets          map[string]KMSWallet //key id
+	SigningAlgorithm string               // aws.String("ECDSA_SHA_256"),
 }
 
 var secp256k1N = crypto.S256().Params().N
@@ -52,7 +58,7 @@ func NewKmsInstance() *KmsEthMgr {
 	return kmsInstance
 }
 
-func (m *KmsEthMgr) InitKmsEthMgr(kmsKey string, kmsSecret string, keyid string) (err error) {
+func (m *KmsEthMgr) InitKmsEthMgr(kmsKey string, kmsSecret string, keyids []string) (err error) {
 	m.awsCfg, err = config.LoadDefaultConfig(context.TODO(),
 		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
 			Value: aws.Credentials{
@@ -65,30 +71,52 @@ func (m *KmsEthMgr) InitKmsEthMgr(kmsKey string, kmsSecret string, keyid string)
 	}
 	m.awsCfg.Region = "ap-southeast-1"
 	m.kmsSvc = kms.NewFromConfig(m.awsCfg)
-	m.keyID = keyid
+	m.Wallets = make(map[string]KMSWallet)
 
-	m.pubKey, err = ethawskmssigner.GetPubKey(m.kmsSvc, m.keyID)
-	if err != nil {
-		logx.Error("GetPubKey fail ", err.Error())
-		return err
+	for _, id := range keyids {
+		key := KMSWallet{}
+		key.id = id
+		key.pubKey, err = ethawskmssigner.GetPubKey(m.kmsSvc, id)
+		if err != nil {
+			logx.Error("GetPubKey fail ", err.Error())
+			return err
+		}
+		key.Address = crypto.PubkeyToAddress(*key.pubKey)
+		addressStr := key.Address.Hex()
+		m.Wallets[strings.ToLower(addressStr)] = key
+		logx.Info("Init KmsEthMgr, addr=", addressStr)
 	}
-
-	m.Address = crypto.PubkeyToAddress(*m.pubKey)
-	m.SigningAlgorithm = "ECDSA_SHA_256"
-
-	logx.Info("Init KmsEthMgr, addr=", m.Address.Hex())
-
 	return nil
 }
 
-func (m *KmsEthMgr) GetNewKmsTransactor(ctx context.Context, chainID *big.Int) (*bind.TransactOpts, error) {
-	return ethawskmssigner.NewAwsKmsTransactorWithChainIDCtx(ctx, m.kmsSvc, m.keyID, chainID)
+func (m *KmsEthMgr) GetNewKmsTransactor(ctx context.Context, chainID *big.Int, address string) (*bind.TransactOpts, error) {
+	wallet, err := m.getWalletInfo(address)
+	if err != nil {
+		return nil, err
+	}
+	op, err := ethawskmssigner.NewAwsKmsTransactorWithChainIDCtx(ctx, m.kmsSvc, wallet.id, chainID)
+	op.From = wallet.Address
+	return op, err
 }
 
-func (m *KmsEthMgr) Sign(message []byte, msgType string) ([]byte, error) {
+func (m *KmsEthMgr) getWalletInfo(address string) (*KMSWallet, error) {
+	wallet, ok := m.Wallets[strings.ToLower(address)]
+	if !ok {
+		logx.Error("waller address error in sign", address)
+		return nil, errors.New("address error")
+	}
+	return &wallet, nil
+}
+
+func (m *KmsEthMgr) Sign(address string, message []byte, msgType string) ([]byte, error) {
+
+	wallet, err := m.getWalletInfo(address)
+	if err != nil {
+		return nil, err
+	}
 
 	input := &kms.SignInput{
-		KeyId:            aws.String(m.keyID),        //aws.String(m.keyID), // aws.String("alias/aa-relayer-key"),
+		KeyId:            aws.String(wallet.id),      //aws.String(m.keyID), // aws.String("alias/aa-relayer-key"),
 		Message:          message,                    // []byte("<message to be signed>")
 		MessageType:      types.MessageType(msgType), // aws.String("RAW"), //aws.String("DIGEST"),
 		SigningAlgorithm: "ECDSA_SHA_256",            // aws.String("ECDSA_SHA_384"),
@@ -114,7 +142,7 @@ func (m *KmsEthMgr) Sign(message []byte, msgType string) ([]byte, error) {
 		sBytes = new(big.Int).Sub(secp256k1N, sBigInt).Bytes()
 	}
 
-	pubKeyBytes := secp256k1.S256().Marshal(m.pubKey.X, m.pubKey.Y)
+	pubKeyBytes := secp256k1.S256().Marshal(wallet.pubKey.X, wallet.pubKey.Y)
 	signature, err := m.getEthereumSignature(pubKeyBytes, message, rBytes, sBytes)
 	if err != nil {
 		return nil, err
