@@ -2,11 +2,11 @@ package chain
 
 import (
 	"context"
-	"log"
 	"math"
 	"math/big"
 	"strings"
 	"sync"
+	"time"
 	wowfish "wowfish/api/contract"
 	"wowfish/api/internal/callback"
 	"wowfish/api/internal/config"
@@ -28,10 +28,11 @@ type Tx struct {
 }
 
 type ChainClient struct {
-	Provider *ethclient.Client
-	Kms      *kms.KmsEthMgr
-	chainId  *big.Int
-	ctx      context.Context
+	Provider   *ethclient.Client
+	Kms        *kms.KmsEthMgr
+	chainId    *big.Int
+	ctx        context.Context
+	rpcAddress string
 }
 
 var once sync.Once
@@ -44,16 +45,24 @@ func ChainClientInstance() *ChainClient {
 	return instance
 }
 
-func (this *ChainClient) InitChainClient(ctx context.Context, config *config.Config) error {
-	provider, err := ethclient.DialContext(ctx, config.Chain.Rpc)
-	if err != nil {
-		logx.Errorf("connect rpc %s error %s", config.Chain.Rpc, err.Error())
-		return err
+func (this *ChainClient) connectWsServer(ctx context.Context) {
+	provider, err := ethclient.DialContext(ctx, this.rpcAddress)
+	for {
+		if err == nil {
+			break
+		}
+		logx.Errorf("connect rpc %s error %s, reconnect....", this.rpcAddress, err.Error())
+		time.Sleep(time.Duration(1) * time.Second)
+		provider, err = ethclient.DialContext(ctx, this.rpcAddress)
 	}
-
+	logx.Infof("connect to ws %s sucess", this.rpcAddress)
 	this.Provider = provider
+}
 
-	chainId, err := provider.ChainID(ctx)
+func (this *ChainClient) InitChainClient(ctx context.Context, config *config.Config) error {
+	this.rpcAddress = config.Chain.Rpc
+	this.connectWsServer(ctx)
+	chainId, err := this.Provider.ChainID(ctx)
 	if err != nil {
 		logx.Errorf("get chain id error %s", err.Error())
 		return err
@@ -221,6 +230,7 @@ func (this *ChainClient) watchToken(tokens []string) {
 		logx.Errorf("SubscribeFilterLogs error %s", err.Error())
 		return
 	}
+	logx.Infof("subscribe query success %+v", query)
 	contractAbi, err := wowfish.WowFishTokenMetaData.GetAbi()
 	if err != nil {
 		logx.Errorf("SubscribeFilterLogs error %s", err.Error())
@@ -231,10 +241,19 @@ func (this *ChainClient) watchToken(tokens []string) {
 			select {
 			case err := <-sub.Err():
 				logx.Errorf("SubscribeFilterLogs error %s", err.Error())
+				//need reconnect
+				this.connectWsServer(this.ctx)
+				//re watch
+				sub, err = this.Provider.SubscribeFilterLogs(this.ctx, query, logs)
+				if err != nil {
+					logx.Errorf("SubscribeFilterLogs error %s", err.Error())
+					return
+				}
+				logx.Infof("re subscribe query success %+v", query)
 			case vLog := <-logs:
 				transferContent, err := contractAbi.Unpack("Transfer", vLog.Data)
 				if err != nil {
-					log.Fatal(err)
+					logx.Error(err)
 				}
 
 				decimal := d[strings.ToLower(vLog.Address.Hex())]

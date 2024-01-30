@@ -1,6 +1,7 @@
 package callback
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
 	"wowfish/api/internal/util"
@@ -14,10 +15,12 @@ type CallBackToWowfish struct {
 }
 
 type CallBackToWowfishData struct {
-	From   string `from:"form"`
-	To     string `from:"to"`
-	Amount string `from:"amount"`
-	Ret    int64  `from:"ret"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Amount string `json:"amount"`
+	Ret    int64  `json:"ret"`
+	Info   string `json:"info"`
+	Sign   string `json:"sign"`
 }
 
 var ins = CallBackToWowfish{
@@ -36,15 +39,19 @@ func (this *CallBackToWowfish) Callback(data *CallBackToWowfishData) error {
 	if this.callbackServer != "" {
 
 		originData := map[string]string{
-			"ret":     strconv.FormatInt(data.Ret, 10),
-			"address": data.From,
-			"to":      data.To,
-			"amount":  data.Amount,
+			"ret":    strconv.FormatInt(data.Ret, 10),
+			"from":   data.From,
+			"to":     data.To,
+			"amount": data.Amount,
+			"info":   data.Info,
 		}
 
-		sign := util.Instance().GetSign(originData)
-		originData["sign"] = sign
-		rsp, err := dohttp.DoMultiFormHttp(map[string]string{}, "POST", this.callbackServer, originData)
+		sign := util.Instance().GetInfrasSign(originData)
+		data.Sign = sign
+
+		jsonData, err := json.Marshal(data)
+
+		rsp, err := dohttp.DoJsonHttp(map[string]string{}, "POST", this.callbackServer, jsonData)
 		defer rsp.Body.Close()
 		if nil != err {
 			logx.Errorf("post to callback error %s", err.Error())

@@ -37,7 +37,7 @@ func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
-		sign := util.Instance().GetSign(params)
+		sign := util.Instance().GetInfrasSign(params)
 		if sign != signIn {
 			logx.Errorf("sign error")
 			response.MakeError(r.Context(), w, errors.New("sign error"), response.NotAllowedError)

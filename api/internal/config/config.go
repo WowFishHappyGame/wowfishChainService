@@ -17,9 +17,17 @@ type ChainConfig struct {
 	Callback string
 }
 
+type Metrics struct {
+	EMailServer string
+	Threshold   float64
+	ToEmail     string
+	SignKey     string
+}
+
 type Config struct {
 	rest.RestConf
 	Chain     ChainConfig
 	Kms       KmsConfig
 	SecretKey string
+	Metrics   Metrics
 }

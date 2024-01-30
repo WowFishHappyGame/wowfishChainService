@@ -2,7 +2,9 @@ package chain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"math/big"
 	"strconv"
@@ -12,6 +14,8 @@ import (
 	"wowfish/api/internal/chain"
 	"wowfish/api/internal/svc"
 	"wowfish/api/internal/types"
+	"wowfish/api/internal/util"
+	"wowfish/api/pkg/dohttp"
 	"wowfish/api/pkg/response"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -33,13 +37,74 @@ func NewWowTransferLogic(ctx context.Context, svcCtx *svc.ServiceContext) *WowTr
 	}
 }
 
+func (l *WowTransferLogic) checkAddressAmount(address string) {
+	if l.svcCtx.Config.Metrics.EMailServer != "" {
+		chainMgr := chain.ChainClientInstance()
+		balance, err := chainMgr.Provider.BalanceAt(context.Background(), common.HexToAddress(address), nil)
+		if err != nil {
+			logx.Error("query blance error ", err.Error())
+			return
+		}
+		balanceInt := balance.Int64()
+		if balanceInt < int64(l.svcCtx.Config.Metrics.Threshold*math.Pow10(18)) {
+			//send the warning email
+			emailData := map[string]string{
+				"email":   l.svcCtx.Config.Metrics.ToEmail,
+				"name":    "Wowfish",
+				"subject": "Wallet Balance not enough",
+				"body":    address + ":" + strconv.FormatFloat(float64(balanceInt)/math.Pow10(18), 'f', 10, 64),
+			}
+			encodeData := util.Instance().EncodeSignData(emailData)
+			encodeData += "&" + l.svcCtx.Config.Metrics.SignKey
+			sign := util.Instance().ToMD5(encodeData)
+
+			emailData["sign"] = sign
+
+			rsp, err := dohttp.DoMultiFormHttp(map[string]string{}, "POST",
+				l.svcCtx.Config.Metrics.EMailServer,
+				emailData)
+			if err != nil {
+				logx.Error("Send Metricsati email error", err.Error())
+				return
+			}
+			defer rsp.Body.Close()
+
+			body, err := io.ReadAll(rsp.Body)
+			if err != nil {
+				logx.Error("Send Metricsati email read response", err.Error())
+				return
+			}
+
+			type EmailResponse struct {
+				Code int64 `json:"code"`
+			}
+
+			var b = EmailResponse{}
+
+			err = json.Unmarshal(body, &b)
+			if err != nil {
+				logx.Error("Send Metricsati Unmarshal response", err.Error())
+				return
+			}
+			if b.Code != 1 {
+				logx.Error("Send Metricsati email errcode", b.Code)
+				return
+			}
+			logx.Info("send metrics email sucess")
+		}
+	}
+}
+
 func (l *WowTransferLogic) commitTransToChain(from string, to string, amount string) {
+
+	l.checkAddressAmount(from)
 
 	ret := callback.CallBackToWowfishData{
 		From:   from,
 		To:     to,
 		Amount: amount,
 		Ret:    0,
+		Info:   "",
 	}
 
 	defer func() {
@@ -54,6 +119,7 @@ func (l *WowTransferLogic) commitTransToChain(from string, to string, amount str
 	if err != nil {
 		logx.Errorf("new erc20 token error %s", err.Error())
 		ret.Ret = response.TransferWowTokenError
+		ret.Info = err.Error()
 		return
 	}
 
@@ -61,6 +127,7 @@ func (l *WowTransferLogic) commitTransToChain(from string, to string, amount str
 	if err != nil {
 		logx.Errorf("new erc20 token error %s", err.Error())
 		ret.Ret = response.TransferWowTokenError
+		ret.Info = err.Error()
 		return
 	}
 
@@ -68,6 +135,7 @@ func (l *WowTransferLogic) commitTransToChain(from string, to string, amount str
 	if err != nil {
 		logx.Errorf("get token abi error %s", err.Error())
 		ret.Ret = response.TransferWowTokenError
+		ret.Info = err.Error()
 		return
 	}
 	fv, err := strconv.ParseFloat(amount, 64)
@@ -76,6 +144,7 @@ func (l *WowTransferLogic) commitTransToChain(from string, to string, amount str
 	if err != nil {
 		logx.Errorf("abi pack transfer error %s", err.Error())
 		ret.Ret = response.TransferWowTokenError
+		ret.Info = err.Error()
 		return
 	}
 	txHash, err := chainMgr.CommitTranscation(&chain.Tx{
@@ -86,6 +155,7 @@ func (l *WowTransferLogic) commitTransToChain(from string, to string, amount str
 	if err != nil {
 		logx.Errorf("transfer error %s", err.Error())
 		ret.Ret = response.TransferWowTokenError
+		ret.Info = err.Error()
 		return
 	}
 	logx.Infof("transcation res %s", txHash)
