@@ -3,7 +3,6 @@ package callback
 import (
 	"encoding/json"
 	"errors"
-	"strconv"
 	"wowfish/api/internal/util"
 	"wowfish/api/pkg/dohttp"
 
@@ -14,50 +13,83 @@ type CallBackToWowfish struct {
 	callbackServer string
 }
 
+type CallbackLogicFunc func() any
+
+type CallbackBaseData struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Ret  int64  `json:"ret"`
+	Info string `json:"info"`
+	Sign string `json:"sign"`
+}
+
 type CallBackToWowfishData struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
+	CallbackBaseData
 	Amount string `json:"amount"`
-	Ret    int64  `json:"ret"`
-	Info   string `json:"info"`
-	Sign   string `json:"sign"`
+}
+
+type CallBackToWowfishNftData struct {
+	CallbackBaseData
+	Id string `json:"nft_id"`
 }
 
 var ins = CallBackToWowfish{
 	callbackServer: "",
 }
 
-func (this *CallBackToWowfish) Init(callbackUrl string) {
-	this.callbackServer = callbackUrl
+func (c *CallBackToWowfish) Init(callbackUrl string) {
+	c.callbackServer = callbackUrl
 }
 
 func Instance() *CallBackToWowfish {
 	return &ins
 }
 
-func (this *CallBackToWowfish) Callback(data *CallBackToWowfishData) error {
-	if this.callbackServer != "" {
+func (c *CallBackToWowfish) DoWithCallback(router string, fun CallbackLogicFunc) {
+	data := fun()
+	if data != nil { //if nil  callback process to watcher
+		err := c.Callback(router, data)
+		if err != nil {
+			logx.Errorf("callback to game error %s", err.Error())
+		}
+	}
+}
 
-		originData := map[string]string{
-			"ret":    strconv.FormatInt(data.Ret, 10),
-			"from":   data.From,
-			"to":     data.To,
-			"amount": data.Amount,
-			"info":   data.Info,
+func (c *CallBackToWowfish) Callback(router string, data any) error {
+	if c.callbackServer != "" {
+
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			logx.Errorf("marshal data to json error %s", err.Error())
+		}
+
+		originData := make(map[string]any)
+		err = json.Unmarshal(jsonData, &originData)
+		if err != nil {
+			logx.Errorf("unmarshal json to map error %s", err.Error())
 		}
 
 		sign := util.Instance().GetInfrasSign(originData)
-		data.Sign = sign
+		originData["sign"] = sign
+		delete(originData, "security_key")
 
-		jsonData, err := json.Marshal(data)
+		//converto json again
 
-		rsp, err := dohttp.DoJsonHttp(map[string]string{}, "POST", this.callbackServer, jsonData)
-		defer rsp.Body.Close()
+		sendData, err := json.Marshal(originData)
+		if err != nil {
+			logx.Errorf("marshal data to json error %s", err.Error())
+		}
+
+		logx.Infof("send to callback %s", string(sendData))
+
+		rsp, err := dohttp.DoJsonHttp(map[string]string{}, "POST", c.callbackServer+router, sendData)
 		if nil != err {
 			logx.Errorf("post to callback error %s", err.Error())
 			return err
 		}
+		defer rsp.Body.Close()
+		return nil
 	}
-	logx.Errorf("callback data is:%+v", data)
-	return errors.New("callback url is nui")
+	logx.Infof("callback data is:%+v", data)
+	return errors.New("callback url is null")
 }

@@ -23,3 +23,4 @@ go.work
 wowfishconfig.yaml
 logs
 wowfish.tar
+push.sh

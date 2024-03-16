@@ -7,14 +7,17 @@ type KmsConfig struct {
 	Secret        string
 	GameWallet    string
 	DisposeWallet string
-	GantWallet    string
+	GainWallet    string
+	AdminWallet   string
 }
 
 type ChainConfig struct {
 	Rpc      string
 	WowToken string
 	WoWNFT   string
+	GameBank string
 	Callback string
+	NftUrl   string
 }
 
 type Metrics struct {
@@ -30,4 +33,14 @@ type Config struct {
 	Kms       KmsConfig
 	SecretKey string
 	Metrics   Metrics
+	Mysql     Mysql
+	Ton       Ton
+}
+
+type Mysql struct {
+	DataSource string
+}
+
+type Ton struct {
+	Rpc string
 }

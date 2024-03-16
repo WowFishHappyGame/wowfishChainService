@@ -13,9 +13,10 @@ import (
 
 func QueryAmountHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req types.WoWQueryAmountReq
+		var req types.WalletType
 		if err := httpx.Parse(r, &req); err != nil {
 			response.MakeError(r.Context(), w, err, response.ParamParseErrorCode)
+			return
 		}
 		l := chainQuery.NewQueryAmountLogic(r.Context(), svcCtx)
 		resp, err := l.QueryAmount(&req)

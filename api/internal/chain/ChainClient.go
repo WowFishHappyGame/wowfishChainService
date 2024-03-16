@@ -19,6 +19,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/zeromicro/go-zero/core/logx"
+
+	et "wowfish/api/pkg/types"
 )
 
 type Tx struct {
@@ -28,11 +30,12 @@ type Tx struct {
 }
 
 type ChainClient struct {
-	Provider   *ethclient.Client
-	Kms        *kms.KmsEthMgr
-	chainId    *big.Int
-	ctx        context.Context
-	rpcAddress string
+	Provider    *ethclient.Client
+	Kms         *kms.KmsEthMgr
+	chainId     *big.Int
+	ctx         context.Context
+	rpcAddress  string
+	bankAddress string
 }
 
 var once sync.Once
@@ -45,57 +48,81 @@ func ChainClientInstance() *ChainClient {
 	return instance
 }
 
-func (this *ChainClient) connectWsServer(ctx context.Context) {
-	provider, err := ethclient.DialContext(ctx, this.rpcAddress)
+func (c *ChainClient) connectWsServer(ctx context.Context) {
+	provider, err := ethclient.DialContext(ctx, c.rpcAddress)
 	for {
 		if err == nil {
 			break
 		}
-		logx.Errorf("connect rpc %s error %s, reconnect....", this.rpcAddress, err.Error())
+		logx.Errorf("connect rpc %s error %s, reconnect....", c.rpcAddress, err.Error())
 		time.Sleep(time.Duration(1) * time.Second)
-		provider, err = ethclient.DialContext(ctx, this.rpcAddress)
+		provider, err = ethclient.DialContext(ctx, c.rpcAddress)
 	}
-	logx.Infof("connect to ws %s sucess", this.rpcAddress)
-	this.Provider = provider
+	logx.Infof("connect to ws %s sucess", c.rpcAddress)
+	c.Provider = provider
 }
 
-func (this *ChainClient) InitChainClient(ctx context.Context, config *config.Config) error {
-	this.rpcAddress = config.Chain.Rpc
-	this.connectWsServer(ctx)
-	chainId, err := this.Provider.ChainID(ctx)
+func (c *ChainClient) InitChainClient(ctx context.Context, config *config.Config) error {
+	c.rpcAddress = config.Chain.Rpc
+	c.connectWsServer(ctx)
+	chainId, err := c.Provider.ChainID(ctx)
 	if err != nil {
 		logx.Errorf("get chain id error %s", err.Error())
 		return err
 	}
+	c.bankAddress = config.Chain.GameBank
+	c.chainId = chainId
+	c.ctx = ctx
+	c.Kms = kms.NewKmsInstance()
+	alias := []kms.KmsAlias{
+		{
+			Kid:  config.Kms.GameWallet,
+			Type: et.GameWallet,
+		},
+		{
+			Kid:  config.Kms.GainWallet,
+			Type: et.GainWallet,
+		},
+		{
+			Kid:  config.Kms.DisposeWallet,
+			Type: et.DisposeWallet,
+		},
+		{
+			Kid:  config.Kms.AdminWallet,
+			Type: et.AdminWallet,
+		},
+	}
 
-	this.chainId = chainId
-	this.ctx = ctx
-	this.Kms = kms.NewKmsInstance()
-	alias := []string{config.Kms.GameWallet, config.Kms.GantWallet, config.Kms.DisposeWallet}
-	err = this.Kms.InitKmsEthMgr(config.Kms.Key, config.Kms.Secret, alias)
+	err = c.Kms.InitKmsEthMgr(config.Kms.Key, config.Kms.Secret, alias)
 	if err != nil {
 		logx.Errorf("int kms manager error %s", err.Error())
 		return err
 	}
 	tokens := []string{config.Chain.WowToken}
-	this.watchToken(tokens)
+
+	var wallets []string
+	wallets = append(wallets, kms.NewKmsInstance().GetWalletAddress(et.GameWallet))
+	wallets = append(wallets, c.bankAddress)
+	wallets = append(wallets, kms.NewKmsInstance().GetWalletAddress(et.DisposeWallet))
+	wallets = append(wallets, kms.NewKmsInstance().GetWalletAddress(et.GainWallet))
+	c.watchToken(tokens, wallets)
 	return nil
 }
 
-func (this *ChainClient) Exit() {
-	this.Provider.Close()
+func (c *ChainClient) Exit() {
+	c.Provider.Close()
 }
 
-func (this *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) {
+func (c *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) {
 	//make raw tx
-	nonce, err := this.Provider.PendingNonceAt(this.ctx, common.HexToAddress(from))
+	nonce, err := c.Provider.PendingNonceAt(c.ctx, common.HexToAddress(from))
 	if err != nil {
 		logx.Errorf("pending nonce error %s", err.Error())
 		return "", err
 	}
 
 	value := big.NewInt(int64(tx.Value)) // in wei (1 eth)
-	gasPrice, err := this.Provider.SuggestGasPrice(this.ctx)
+	gasPrice, err := c.Provider.SuggestGasPrice(c.ctx)
 	if err != nil {
 		logx.Errorf("suggest gas price error %s", err.Error())
 		return "", err
@@ -103,14 +130,14 @@ func (this *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) 
 
 	toAddress := common.HexToAddress(tx.To)
 
-	eGas, err := this.GetEstimateGas(tx, from)
+	eGas, err := c.GetEstimateGas(tx, from)
 	if err != nil {
 		logx.Errorf("estimate gas error %s", err.Error())
 		return "", err
 	}
 
 	dynamicTx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   this.chainId,
+		ChainID:   c.chainId,
 		Nonce:     nonce,
 		GasFeeCap: gasPrice,
 		GasTipCap: big.NewInt(0),
@@ -120,10 +147,10 @@ func (this *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) 
 		Data:      tx.Data,
 	})
 
-	signer := types.LatestSignerForChainID(this.chainId)
+	signer := types.LatestSignerForChainID(c.chainId)
 	txHashBytes := signer.Hash(dynamicTx).Bytes()
 
-	txSignResult, err := this.Kms.Sign(from, txHashBytes, "DIGEST")
+	txSignResult, err := c.Kms.Sign(from, txHashBytes, "DIGEST")
 	if err != nil {
 		logx.Errorf("sign dynamic tx error %s", err.Error())
 		return "", err
@@ -133,7 +160,7 @@ func (this *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) 
 		logx.Errorf("tx WithSignature error %s", err.Error())
 		return "", err
 	}
-	err = this.Provider.SendTransaction(this.ctx, dynamicTx)
+	err = c.Provider.SendTransaction(c.ctx, dynamicTx)
 	if err != nil {
 		logx.Errorf("send transcation tx error %s", err.Error())
 		return "", err
@@ -141,20 +168,20 @@ func (this *ChainClient) CommitTranscation(tx *Tx, from string) (string, error) 
 	return dynamicTx.Hash().Hex(), nil
 }
 
-func (this *ChainClient) GenTranction(from string) (*bind.TransactOpts, error) {
-	txOp, err := this.Kms.GetNewKmsTransactor(this.ctx, this.chainId, from)
+func (c *ChainClient) GenTranction(from string) (*bind.TransactOpts, error) {
+	txOp, err := c.Kms.GetNewKmsTransactor(c.ctx, c.chainId, from)
 	if err != nil {
 		logx.Errorf("gen kms transcatior error %s", err.Error())
 		return nil, err
 	}
 
-	nonce, err := this.Provider.PendingNonceAt(this.ctx, txOp.From)
+	nonce, err := c.Provider.PendingNonceAt(c.ctx, txOp.From)
 	if err != nil {
 		logx.Errorf("pending nonce error %s", err.Error())
 		return nil, err
 	}
 
-	gasPrice, err := this.Provider.SuggestGasPrice(this.ctx)
+	gasPrice, err := c.Provider.SuggestGasPrice(c.ctx)
 	if err != nil {
 		logx.Errorf("suggest gas price error %s", err.Error())
 		return nil, err
@@ -167,9 +194,9 @@ func (this *ChainClient) GenTranction(from string) (*bind.TransactOpts, error) {
 		if address != txOp.From {
 			return nil, bind.ErrNotAuthorized
 		}
-		signer := types.LatestSignerForChainID(this.chainId)
+		signer := types.LatestSignerForChainID(c.chainId)
 		txHashBytes := signer.Hash(tx).Bytes()
-		signature, err := this.Kms.Sign(from, txHashBytes, "DIGEST")
+		signature, err := c.Kms.Sign(from, txHashBytes, "DIGEST")
 		if err != nil {
 			logx.Errorf("sign dynamic tx error %s", err.Error())
 			return nil, err
@@ -179,7 +206,7 @@ func (this *ChainClient) GenTranction(from string) (*bind.TransactOpts, error) {
 	return txOp, nil
 }
 
-func (this *ChainClient) GetEstimateGas(tx *Tx, address string) (eGas uint64, err error) {
+func (c *ChainClient) GetEstimateGas(tx *Tx, address string) (eGas uint64, err error) {
 	toAddress := common.HexToAddress(tx.To)
 	cMsg := ethereum.CallMsg{
 		From: common.HexToAddress(address),
@@ -187,7 +214,7 @@ func (this *ChainClient) GetEstimateGas(tx *Tx, address string) (eGas uint64, er
 		Data: tx.Data,
 	}
 
-	eGas, err = this.Provider.EstimateGas(this.ctx, cMsg)
+	eGas, err = c.Provider.EstimateGas(c.ctx, cMsg)
 	if err != nil {
 		logx.Errorf("EstimateGas err:%s", err.Error())
 		return 0, err
@@ -195,8 +222,26 @@ func (this *ChainClient) GetEstimateGas(tx *Tx, address string) (eGas uint64, er
 	return eGas, nil
 }
 
-func (this *ChainClient) watchToken(tokens []string) {
+func (c *ChainClient) QueryRespection(hash common.Hash) bool {
+	const retryTimes = 15
+	var sucess = false
+	for i := 0; i < retryTimes; i++ {
+		receip, err := c.Provider.TransactionReceipt(c.ctx, hash)
+		if err == nil {
+			sucess = receip.BlockNumber.Int64() != 0
+			break
+		}
+	}
+	return sucess
+}
+
+func (c *ChainClient) watchToken(tokens []string, fromWallets []string) {
+	currentBlock, err := c.Provider.BlockNumber(c.ctx)
+	if err != nil {
+		logx.Errorf("query block num error: %s", err.Error())
+	}
 	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(int64(currentBlock)),
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{},
 	}
@@ -208,7 +253,7 @@ func (this *ChainClient) watchToken(tokens []string) {
 
 		tokenAddress := common.HexToAddress(token)
 		//query decimal
-		wowToken, err := wowfish.NewWowFishToken(tokenAddress, this.Provider)
+		wowToken, err := wowfish.NewWowFishToken(tokenAddress, c.Provider)
 		if err != nil {
 			logx.Errorf("SubscribeFilterLogs create wowfish token error %s", err.Error())
 			break
@@ -225,7 +270,7 @@ func (this *ChainClient) watchToken(tokens []string) {
 	}
 
 	logs := make(chan types.Log)
-	sub, err := this.Provider.SubscribeFilterLogs(this.ctx, query, logs)
+	sub, err := c.Provider.SubscribeFilterLogs(c.ctx, query, logs)
 	if err != nil {
 		logx.Errorf("SubscribeFilterLogs error %s", err.Error())
 		return
@@ -242,9 +287,9 @@ func (this *ChainClient) watchToken(tokens []string) {
 			case err := <-sub.Err():
 				logx.Errorf("SubscribeFilterLogs error %s", err.Error())
 				//need reconnect
-				this.connectWsServer(this.ctx)
+				c.connectWsServer(c.ctx)
 				//re watch
-				sub, err = this.Provider.SubscribeFilterLogs(this.ctx, query, logs)
+				sub, err = c.Provider.SubscribeFilterLogs(c.ctx, query, logs)
 				if err != nil {
 					logx.Errorf("SubscribeFilterLogs error %s", err.Error())
 					return
@@ -256,8 +301,22 @@ func (this *ChainClient) watchToken(tokens []string) {
 					logx.Error(err)
 				}
 
-				decimal := d[strings.ToLower(vLog.Address.Hex())]
+				from := common.HexToAddress(vLog.Topics[1].Hex()).String()
+				to := common.HexToAddress(vLog.Topics[2].Hex()).String()
 
+				//check callback address
+				var valid = false
+				for _, validAddress := range fromWallets {
+					if strings.EqualFold(validAddress, from) || strings.EqualFold(validAddress, to) {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					continue
+				}
+
+				decimal := d[strings.ToLower(vLog.Address.Hex())]
 				if decimal == 0 {
 					logx.Errorf("revice event but not find decimal %s", vLog.Address.Hex())
 					continue
@@ -273,20 +332,38 @@ func (this *ChainClient) watchToken(tokens []string) {
 				contentValue := big.NewFloat(float64(content.Uint64()))
 				contentValue.Quo(contentValue, big.NewFloat(x))
 
-				from := common.HexToAddress(vLog.Topics[1].Hex()).String()
-				to := common.HexToAddress(vLog.Topics[2].Hex()).String()
+				//convert address to type
+				if strings.EqualFold(from, c.bankAddress) {
+					from = et.BankWallet
+				} else {
+					fromInfo, err := kms.NewKmsInstance().GetWalletInfo(from)
+					if err == nil {
+						from = fromInfo.Id.Type
+					}
+				}
+
+				toInfo, err := kms.NewKmsInstance().GetWalletInfo(to)
+				if err == nil { //"to address" maybe user
+					to = toInfo.Id.Type
+				}
+
 				amount := contentValue.String()
 				logx.Infof("From:%s,To:%s,Amount:%s",
 					from,
 					to,
 					amount)
 				//callback
-				callback.Instance().Callback(&callback.CallBackToWowfishData{
-					From:   from,
-					To:     to,
+				err = callback.Instance().Callback("/chain/consume", &callback.CallBackToWowfishData{
+					CallbackBaseData: callback.CallbackBaseData{
+						From: from,
+						To:   to,
+						Ret:  0,
+					},
 					Amount: amount,
-					Ret:    0,
 				})
+				if err != nil {
+					logx.Errorf("Callback to game error %s", err.Error())
+				}
 			}
 		}
 	}(decimals)

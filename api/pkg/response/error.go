@@ -6,4 +6,5 @@ const (
 	LogicErroeCode        = ResponseErrorCode + 2
 	NotAllowedError       = ResponseErrorCode + 3
 	TransferWowTokenError = ResponseErrorCode + 4
+	TransferWowNftError   = ResponseErrorCode + 5
 )

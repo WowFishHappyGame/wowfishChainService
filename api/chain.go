@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"net/http"
 	"os"
 
 	"wowfish/api/internal/callback"
@@ -11,6 +13,8 @@ import (
 	"wowfish/api/internal/handler"
 	"wowfish/api/internal/svc"
 	"wowfish/api/internal/util"
+	"wowfish/api/pkg/response"
+	"wowfish/api/pkg/ton"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -37,7 +41,6 @@ func main() {
 	var c config.Config
 	conf.MustLoad(*configFile, &c)
 
-	//初始化chain client
 	chainClient := chain.ChainClientInstance()
 	err := chainClient.InitChainClient(context.Background(), &c)
 	if err != nil {
@@ -45,10 +48,27 @@ func main() {
 	}
 	defer chainClient.Exit()
 
+	err = ton.Instance().Init(c.Ton.Rpc)
+	if err != nil {
+		logx.Errorf("init ton rpc error %s", err)
+	}
+
 	callback.Instance().Init(c.Chain.Callback)
 	util.Instance().Init(c.SecretKey)
 
-	server := rest.MustNewServer(c.RestConf)
+	server := rest.MustNewServer(c.RestConf,
+		rest.WithCustomCors( 
+			func(header http.Header) {
+				header.Set("Access-Control-Allow-Origin", "*")
+				header.Set("Access-Control-Allow-Headers", "*")
+				header.Set("Access-Control-Allow-Methods", " POST,OPTIONS")
+			}, nil, "*"),
+		rest.WithNotAllowedHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.MakeError(r.Context(), nil, errors.New("cors error"), response.NotAllowedError)
+		})),
+		rest.WithNotFoundHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.MakeError(r.Context(), nil, errors.New("cors error"), response.NotAllowedError)
+		})))
 	defer server.Stop()
 
 	ctx := svc.NewServiceContext(c)

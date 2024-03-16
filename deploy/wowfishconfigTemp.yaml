@@ -6,19 +6,21 @@ Chain:
   Rpc: "https://arbitrum-goerli.blockpi.network/v1/rpc/a6452d54066e293d1e0a72b414a17a2b291717b8"
   WowToken: 0x6788a0567B90Ec2ef9FD71f40Ddf03F1645EfF0A
   WoWNFT: 0xC947d8ffC4060B8698EA37638EC47288Fc3BcCF8
+  GameBank: 0xc02e1C83367Ccf7a53cA80C3ce970c66Ee2FF9ba
   Callback: "https://testchainfsih.gz-cube.com:8821/chain/consume"
 
 Kms:
   Key: 
   Secret: 
   GameWallet: "alias/wowfishBack"
-  DisposeWallet: "alias/wofishDespose"
-  GantWallet: "alias/wowfishGain" 
+  DisposeWallet: "alias/wofishDespose" 
+  GainWallet: "alias/wowfishGain" 
+  AdminWallet: "alias/wowfishAdmin" 
 
 SecretKey:
 
 Metrics:
   EMailServer: 
-  Threshold: 
+  Threshold: 0.001
   ToEmail: 
   SignKey: 

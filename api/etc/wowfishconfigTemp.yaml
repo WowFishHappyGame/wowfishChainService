@@ -12,5 +12,9 @@ Kms:
   Key: 
   Secret: 
   Alias:
+  GameWallet: # 
+  DisposeWallet:  # 
+  GainWallet: # 
+  AdminWallet: # 
 
 SecretKey: 

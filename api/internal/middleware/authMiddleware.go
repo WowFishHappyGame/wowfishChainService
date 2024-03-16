@@ -19,14 +19,13 @@ func NewAuthMiddleware(secretKey string) *AuthMiddleware {
 func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO generate middleware implement function, delete after code implementation
-		//签名校验
 		const MaxMultipartMemory = 32 << 20 //32M
 		if err := r.ParseMultipartForm(MaxMultipartMemory); err != nil {
 			response.MakeError(r.Context(), w, err, response.NotAllowedError)
 			return
 		}
 		values := r.PostForm
-		params := make(map[string]string, 0)
+		params := make(map[string]any, 0)
 		signIn := ""
 		for key, val := range values {
 			if len(val) > 0 && key != "sign" {

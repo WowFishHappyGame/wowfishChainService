@@ -21,6 +21,16 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 					Path:    "/wowTransfer",
 					Handler: chain.WowTransferHandler(serverCtx),
 				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/withdrawToCenter",
+					Handler: chain.WowWithdrawToCenterHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/mintNft",
+					Handler: chain.MintNftHandler(serverCtx),
+				},
 			}...,
 		),
 		rest.WithPrefix("/chain"),
@@ -37,6 +47,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Method:  http.MethodPost,
 				Path:    "/queryAmount",
 				Handler: chainQuery.QueryAmountHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
+				Path:    "/queryTonWallet",
+				Handler: chainQuery.QueryTonWalletHandler(serverCtx),
 			},
 		},
 		rest.WithPrefix("/chain"),

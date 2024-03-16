@@ -2,25 +2,26 @@ package chain
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"math"
 	"math/big"
-	"strconv"
 
-	wowfish "wowfish/api/contract"
 	"wowfish/api/internal/callback"
 	"wowfish/api/internal/chain"
 	"wowfish/api/internal/svc"
 	"wowfish/api/internal/types"
-	"wowfish/api/internal/util"
-	"wowfish/api/pkg/dohttp"
+	"wowfish/api/pkg/kms"
 	"wowfish/api/pkg/response"
+	"wowfish/api/pkg/walletwatcher"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/zeromicro/go-zero/core/logx"
+
+	et "wowfish/api/pkg/types"
+
+	wowfish "wowfish/api/contract"
 )
 
 type WowTransferLogic struct {
@@ -37,136 +38,104 @@ func NewWowTransferLogic(ctx context.Context, svcCtx *svc.ServiceContext) *WowTr
 	}
 }
 
-func (l *WowTransferLogic) checkAddressAmount(address string) {
-	if l.svcCtx.Config.Metrics.EMailServer != "" {
+func (l *WowTransferLogic) commitTransToChain(walletType string, from string, to string, amount string) {
+
+	walletwatcher.Instance().CheckAddressAmount(from)
+
+	callback.Instance().DoWithCallback("/chain/consume", func() any {
+
+		ret := &callback.CallBackToWowfishData{
+			CallbackBaseData: callback.CallbackBaseData{
+				From: walletType,
+				To:   to,
+				Ret:  0,
+				Info: "",
+			},
+			Amount: amount,
+		}
+		tAddress := common.HexToAddress(l.svcCtx.Config.Chain.WowToken)
 		chainMgr := chain.ChainClientInstance()
-		balance, err := chainMgr.Provider.BalanceAt(context.Background(), common.HexToAddress(address), nil)
+
+		wowfishToken, err := wowfish.NewWowFishToken(tAddress, chainMgr.Provider)
 		if err != nil {
-			logx.Error("query blance error ", err.Error())
-			return
+			logx.Errorf("new erc20 token error %s", err.Error())
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = err.Error()
+			return ret
 		}
-		balanceInt := balance.Int64()
-		if balanceInt < int64(l.svcCtx.Config.Metrics.Threshold*math.Pow10(18)) {
-			//send the warning email
-			emailData := map[string]string{
-				"email":   l.svcCtx.Config.Metrics.ToEmail,
-				"name":    "Wowfish",
-				"subject": "Wallet Balance not enough",
-				"body":    address + ":" + strconv.FormatFloat(float64(balanceInt)/math.Pow10(18), 'f', 10, 64),
-			}
-			encodeData := util.Instance().EncodeSignData(emailData)
-			encodeData += "&" + l.svcCtx.Config.Metrics.SignKey
-			sign := util.Instance().ToMD5(encodeData)
 
-			emailData["sign"] = sign
-
-			rsp, err := dohttp.DoMultiFormHttp(map[string]string{}, "POST",
-				l.svcCtx.Config.Metrics.EMailServer,
-				emailData)
-			if err != nil {
-				logx.Error("Send Metricsati email error", err.Error())
-				return
-			}
-			defer rsp.Body.Close()
-
-			body, err := io.ReadAll(rsp.Body)
-			if err != nil {
-				logx.Error("Send Metricsati email read response", err.Error())
-				return
-			}
-
-			type EmailResponse struct {
-				Code int64 `json:"code"`
-			}
-
-			var b = EmailResponse{}
-
-			err = json.Unmarshal(body, &b)
-			if err != nil {
-				logx.Error("Send Metricsati Unmarshal response", err.Error())
-				return
-			}
-			if b.Code != 1 {
-				logx.Error("Send Metricsati email errcode", b.Code)
-				return
-			}
-			logx.Info("send metrics email sucess")
+		decimal, err := wowfishToken.Decimals(&bind.CallOpts{})
+		if err != nil {
+			logx.Errorf("new erc20 token error %s", err.Error())
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = err.Error()
+			return ret
 		}
-	}
-}
 
-func (l *WowTransferLogic) commitTransToChain(from string, to string, amount string) {
-
-	l.checkAddressAmount(from)
-
-	ret := callback.CallBackToWowfishData{
-		From:   from,
-		To:     to,
-		Amount: amount,
-		Ret:    0,
-		Info:   "",
-	}
-
-	defer func() {
-		if ret.Ret != 0 {
-			callback.Instance().Callback(&ret)
+		txOp, err := chainMgr.GenTranction(from)
+		if err != nil {
+			logx.Errorf("gen transcation op error %s", err.Error())
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = err.Error()
+			return ret
 		}
-	}()
 
-	tAddress := common.HexToAddress(l.svcCtx.Config.Chain.WowToken)
-	chainMgr := chain.ChainClientInstance()
-	wowfishToken, err := wowfish.NewWowFishToken(tAddress, chainMgr.Provider)
-	if err != nil {
-		logx.Errorf("new erc20 token error %s", err.Error())
-		ret.Ret = response.TransferWowTokenError
-		ret.Info = err.Error()
-		return
-	}
+		fv, _, err := big.ParseFloat(amount, 10, 256, big.ToNearestEven)
+		if err != nil {
+			logx.Errorf("parse float error %s", err.Error())
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = err.Error()
+			return ret
+		}
 
-	decimal, err := wowfishToken.Decimals(&bind.CallOpts{})
-	if err != nil {
-		logx.Errorf("new erc20 token error %s", err.Error())
-		ret.Ret = response.TransferWowTokenError
-		ret.Info = err.Error()
-		return
-	}
-
-	abi, err := wowfish.WowFishTokenMetaData.GetAbi()
-	if err != nil {
-		logx.Errorf("get token abi error %s", err.Error())
-		ret.Ret = response.TransferWowTokenError
-		ret.Info = err.Error()
-		return
-	}
-	fv, err := strconv.ParseFloat(amount, 64)
-
-	txData, err := abi.Pack("transfer", common.HexToAddress(to), big.NewInt(int64(fv*math.Pow10(int(decimal)))))
-	if err != nil {
-		logx.Errorf("abi pack transfer error %s", err.Error())
-		ret.Ret = response.TransferWowTokenError
-		ret.Info = err.Error()
-		return
-	}
-	txHash, err := chainMgr.CommitTranscation(&chain.Tx{
-		To:    l.svcCtx.Config.Chain.WowToken,
-		Value: 0,
-		Data:  txData,
-	}, from)
-	if err != nil {
-		logx.Errorf("transfer error %s", err.Error())
-		ret.Ret = response.TransferWowTokenError
-		ret.Info = err.Error()
-		return
-	}
-	logx.Infof("transcation res %s", txHash)
+		var amountInt64 = big.NewInt(0)
+		fv.Mul(fv, big.NewFloat(math.Pow10(int(decimal)))).Int(amountInt64)
+		tx, err := wowfishToken.Transfer(txOp, common.HexToAddress(to), amountInt64)
+		if err != nil {
+			logx.Errorf("transfer error %s", err.Error())
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = err.Error()
+			return ret
+		}
+		logx.Infof("transcation res %s", tx.Hash().String())
+		//check trans recipect
+		sucess := chainMgr.QueryRespection(tx.Hash())
+		if !sucess {
+			ret.Ret = response.TransferWowTokenError
+			ret.Info = fmt.Sprintf("Transfer wow token on chain error %s", tx.Hash().Hex())
+			return ret
+		}
+		return nil
+	})
 }
 
 func (l *WowTransferLogic) WowTransfer(req *types.TransferReqs) (resp *types.TransferResp, err error) {
 	//coroutine the rpc may timeout
-	if req.From == "" || req.To == "" || req.Amount == "" || req.Amount == "0" {
+	if req.Type == "" || req.To == "" || req.Amount == "" || req.Amount == "0" {
 		return nil, errors.New("param error")
 	}
-	go l.commitTransToChain(req.From, req.To, req.Amount)
+	if req.Type != et.DisposeWallet &&
+		req.Type != et.GameWallet {
+		return nil, errors.New("only support from DisposeWallet or GameWallet")
+	}
+	from := kms.NewKmsInstance().GetWalletAddress(req.Type)
+	if from == "" {
+		return nil, fmt.Errorf("can't find wallet witch type named %s", req.Type)
+	}
+	to := req.To
+	if to == et.BankWallet || to == et.AdminWallet {
+		return nil, fmt.Errorf("can't transfer to wallet %s", to)
+	}
+
+	if to == et.DisposeWallet || to == et.GainWallet ||
+		to == et.GameWallet {
+		to = kms.NewKmsInstance().GetWalletAddress(to)
+	}
+	if to == "" {
+		return nil, fmt.Errorf("can't find wallet witch type named %s", to)
+	}
+
+	go l.commitTransToChain(req.Type, from, to, req.Amount)
 	resp = &types.TransferResp{
 		Result: true,
 	}
